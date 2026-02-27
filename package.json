@@ -1,0 +1,248 @@
+{
+  "name": "meme-compiler-audio",
+  "displayName": "Meme Compiler: Audio Feedback for VS Code",
+  "description": "Play iconic meme sounds (FAAAHH, Vine Boom, Women Haha) when your code succeeds, errors, or makes silly mistakes. 11 built-in sounds with easy dropdown configuration.",
+  "version": "0.0.1",
+  "publisher": "SivaKanth007",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/SivaKanth007/Custom_Sounds"
+  },
+  "icon": "icon.png",
+  "keywords": [
+    "meme",
+    "sound",
+    "audio",
+    "terminal",
+    "fun",
+    "error",
+    "compiler",
+    "feedback"
+  ],
+  "engines": {
+    "vscode": "^1.93.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "configuration": {
+      "title": "Meme Compiler",
+      "properties": {
+        "memeCompiler.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable or disable meme sounds on code execution.",
+          "order": 1
+        },
+        "memeCompiler.sounds.error": {
+          "type": "string",
+          "default": "faaaahhhhhhh-high",
+          "enum": [
+            "fahhh-low",
+            "faaaahhhhhhh-high",
+            "vine-boom",
+            "exclamation",
+            "among-us-role-reveal-sound",
+            "anime-ahh",
+            "custom",
+            "none"
+          ],
+          "enumItemLabels": [
+            "FAAAHH (Low) 😱",
+            "FAAAAAHHHHH (High) 🔊",
+            "Vine Boom 💥",
+            "Exclamation ❗",
+            "Among Us Role Reveal 📮",
+            "Anime Ahh 😩",
+            "Custom file...",
+            "No sound"
+          ],
+          "enumDescriptions": [
+            "The classic FAAAHH meme sound (low pitch)",
+            "Extended FAAAAAHHHHH meme (high pitch)",
+            "The iconic Vine boom sound effect",
+            "A loud exclamation sound",
+            "Among Us role reveal dramatic sound",
+            "Anime reaction ahh sound",
+            "Opens file picker to browse .mp3/.wav files",
+            "Disable this sound"
+          ],
+          "markdownDescription": "Sound to play when your code hits an error. [▶ Test](command:meme-compiler-audio.testError)",
+          "order": 2
+        },
+        "memeCompiler.sounds.silly": {
+          "type": "string",
+          "default": "brah",
+          "enum": [
+            "women",
+            "brah",
+            "custom",
+            "none"
+          ],
+          "enumItemLabels": [
+            "Women Haha 🤣",
+            "Bruh 😐",
+            "Custom file...",
+            "No sound"
+          ],
+          "enumDescriptions": [
+            "The 'Women' meme followed by laughing",
+            "The classic 'bruh' reaction sound",
+            "Opens file picker to browse .mp3/.wav files",
+            "Disable this sound"
+          ],
+          "markdownDescription": "Sound for silly mistakes (undefined, null, NaN, etc.). [▶ Test](command:meme-compiler-audio.testSilly)",
+          "order": 3
+        },
+        "memeCompiler.sounds.success": {
+          "type": "string",
+          "default": "anime-wow-sound-effect",
+          "enum": [
+            "anime-wow-sound-effect",
+            "click-nice",
+            "custom",
+            "none"
+          ],
+          "enumItemLabels": [
+            "Anime Wow ✨",
+            "Click Nice 👌",
+            "Custom file...",
+            "No sound"
+          ],
+          "enumDescriptions": [
+            "Anime wow reaction sound",
+            "Satisfying click 'nice' sound",
+            "Opens file picker to browse .mp3/.wav files",
+            "Disable this sound"
+          ],
+          "markdownDescription": "Sound to play when your code runs successfully. [▶ Test](command:meme-compiler-audio.testSuccess)",
+          "order": 4
+        },
+        "memeCompiler.sounds.running": {
+          "type": "string",
+          "default": "run-vine-sound-effect",
+          "enum": [
+            "run-vine-sound-effect",
+            "custom",
+            "none"
+          ],
+          "enumItemLabels": [
+            "Run Vine 🏃",
+            "Custom file...",
+            "No sound"
+          ],
+          "enumDescriptions": [
+            "Vine 'run' sound effect — plays while code executes",
+            "Opens file picker to browse .mp3/.wav files",
+            "No sound while running"
+          ],
+          "markdownDescription": "Sound to play while your code is running. [▶ Test](command:meme-compiler-audio.testRunning)",
+          "order": 5
+        },
+        "memeCompiler.detection.errorKeywords": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            "Error:",
+            "Exception:",
+            "failed",
+            "stack trace",
+            "syntax error"
+          ],
+          "description": "Keywords in terminal output that trigger the error sound.",
+          "order": 6
+        },
+        "memeCompiler.detection.sillyKeywords": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            "undefined",
+            "null",
+            "NaN",
+            "unexpected token",
+            "IndentationError",
+            "SyntaxError",
+            "TypeError",
+            "NameError",
+            "compilation error",
+            "compile error"
+          ],
+          "description": "Keywords that trigger the silly mistake sound.",
+          "order": 7
+        },
+        "memeCompiler.detection.useExitCode": {
+          "type": "boolean",
+          "default": true,
+          "description": "Trigger error sound based on non-zero exit code.",
+          "order": 8
+        }
+      }
+    },
+    "commands": [
+      {
+        "command": "meme-compiler-audio.playTestSound",
+        "title": "Meme Compiler: Play Test Sound"
+      },
+      {
+        "command": "meme-compiler-audio.openSoundsFolder",
+        "title": "Meme Compiler: Open Sounds Folder"
+      },
+      {
+        "command": "meme-compiler-audio.browseCustomSound",
+        "title": "Meme Compiler: Browse Custom Sound File"
+      },
+      {
+        "command": "meme-compiler-audio.testError",
+        "title": "Meme Compiler: Test Error Sound"
+      },
+      {
+        "command": "meme-compiler-audio.testSilly",
+        "title": "Meme Compiler: Test Silly Sound"
+      },
+      {
+        "command": "meme-compiler-audio.testSuccess",
+        "title": "Meme Compiler: Test Success Sound"
+      },
+      {
+        "command": "meme-compiler-audio.testRunning",
+        "title": "Meme Compiler: Test Running Sound"
+      }
+    ]
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run package",
+    "compile": "npm run check-types && npm run lint && node esbuild.js",
+    "watch": "npm-run-all -p watch:*",
+    "watch:esbuild": "node esbuild.js --watch",
+    "watch:tsc": "tsc --noEmit --watch --project tsconfig.json",
+    "package": "npm run check-types && npm run lint && node esbuild.js --production",
+    "compile-tests": "tsc -p . --outDir out",
+    "watch-tests": "tsc -p . -w --outDir out",
+    "pretest": "npm run compile-tests && npm run compile && npm run lint",
+    "check-types": "tsc --noEmit",
+    "lint": "eslint src",
+    "test": "vscode-test"
+  },
+  "devDependencies": {
+    "@types/mocha": "^10.0.10",
+    "@types/node": "22.x",
+    "@types/vscode": "^1.109.0",
+    "@vscode/test-cli": "^0.0.12",
+    "@vscode/test-electron": "^2.5.2",
+    "esbuild": "^0.27.2",
+    "eslint": "^9.39.2",
+    "npm-run-all": "^4.1.5",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.54.0"
+  }
+}
