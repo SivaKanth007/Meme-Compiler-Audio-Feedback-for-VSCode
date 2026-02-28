@@ -2,7 +2,7 @@
   "name": "meme-compiler-audio",
   "displayName": "Meme Compiler: Audio Feedback for VS Code",
   "description": "Play iconic meme sounds (FAAAHH, Vine Boom, Yamete Kudasai, and more) when your code succeeds, errors, or makes silly mistakes. 16 built-in sounds with easy dropdown configuration.",
-  "version": "0.0.3",
+  "version": "0.0.4",
   "publisher": "SivaKanth007",
   "license": "MIT",
   "repository": {
