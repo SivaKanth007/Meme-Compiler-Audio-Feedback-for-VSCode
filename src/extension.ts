@@ -50,17 +50,22 @@ function playSoundFile(filePath: string): ChildProcess | null {
 // ===== SOUND MAP =====
 
 const BUNDLED_SOUNDS: Record<string, string> = {
-    'fahhh-low': 'Error_sounds/fahhh-low.mp3',
-    'faaaahhhhhhh-high': 'Error_sounds/faaaahhhhhhh-high.mp3',
-    'vine-boom': 'Error_sounds/vine-boom.mp3',
-    'exclamation': 'Error_sounds/exclamation.mp3',
-    'among-us-role-reveal-sound': 'Error_sounds/among-us-role-reveal-sound.mp3',
-    'anime-ahh': 'Error_sounds/anime-ahh.mp3',
-    'women': 'Silly_errors/women.mp3',
-    'brah': 'Silly_errors/brah.mp3',
-    'anime-wow-sound-effect': 'Success_sounds/anime-wow-sound-effect.mp3',
-    'click-nice': 'Success_sounds/click-nice.mp3',
-    'run-vine-sound-effect': 'Running_sounds/run-vine-sound-effect.mp3'
+    'fahhh-low': 'fahhh-low.mp3',
+    'faaaahhhhhhh-high': 'faaaahhhhhhh-high.mp3',
+    'vine-boom': 'vine-boom.mp3',
+    'exclamation': 'exclamation.mp3',
+    'among-us-role-reveal-sound': 'among-us-role-reveal-sound.mp3',
+    'anime-ahh': 'anime-ahh.mp3',
+    'women': 'women.mp3',
+    'brah': 'brah.mp3',
+    'anime-wow-sound-effect': 'anime-wow-sound-effect.mp3',
+    'click-nice': 'click-nice.mp3',
+    'run-vine-sound-effect': 'run-vine-sound-effect.mp3',
+    'anime-punch-sad-sound-effect': 'anime-punch-sad-sound-effect.mp3',
+    'nya-cat-girl-sound': 'nya-cat-girl-sound.mp3',
+    'strongpunch': 'strongpunch.mp3',
+    'yamete-kudasai-sound-effect-full-warning': 'yamete-kudasai-sound-effect-full-warning.mp3',
+    'yamete-kudasai-sound-effect-short': 'yamete-kudasai-sound-effect-short.mp3'
 };
 
 const SOUND_CATEGORIES = ['error', 'silly', 'success', 'running'] as const;
