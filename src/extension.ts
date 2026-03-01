@@ -1,286 +1,237 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
-import { exec, ChildProcess } from 'child_process';
+import { exec, spawn, ChildProcess } from 'child_process';
 
 // ===== AUDIO MANAGER =====
-// Handles sound playback with stop/replace capability — no overlapping
 
-let currentAudioProcess: ChildProcess | null = null;
+let currentProc: ChildProcess | null = null;
+const isWin = process.platform === 'win32';
+const isMac = process.platform === 'darwin';
 
-/**
- * Stop whatever sound is currently playing.
- * Uses taskkill /T /F to kill the entire process tree on Windows,
- * because .kill() only kills the parent — the PowerShell child keeps playing.
- */
-function stopCurrentSound() {
-    if (currentAudioProcess && currentAudioProcess.pid) {
-        try {
-            exec(`taskkill /PID ${currentAudioProcess.pid} /T /F`, () => { });
-        } catch { /* already dead */ }
-        currentAudioProcess = null;
-    }
+function stopSound() {
+    if (!currentProc?.pid) { return; }
+    try {
+        if (isWin) {
+            exec(`taskkill /PID ${currentProc.pid} /T /F`, () => { });
+        } else {
+            process.kill(-currentProc.pid, 'SIGKILL');
+        }
+    } catch { /* already dead */ }
+    currentProc = null;
 }
 
-/**
- * Play a sound file (.mp3 or .wav). Stops any currently playing sound first.
- * Uses WPF MediaPlayer which supports MP3 natively.
- * The process sleeps for 5 minutes — we kill it when we want to stop playback.
- */
-function playSoundFile(filePath: string): ChildProcess | null {
-    stopCurrentSound();
+function playSound(filePath: string): ChildProcess | null {
+    stopSound();
 
-    // Convert to forward-slash file URI for .NET Uri class
-    const fileUri = 'file:///' + filePath.replace(/\\/g, '/');
-    const command = `powershell -c "Add-Type -AssemblyName presentationCore; $p = New-Object System.Windows.Media.MediaPlayer; $p.Open([Uri]'${fileUri}'); $p.Play(); Start-Sleep -Seconds 300"`;
+    let command: string;
+    if (isWin) {
+        const uri = 'file:///' + filePath.replace(/\\/g, '/');
+        command = `powershell -c "Add-Type -AssemblyName presentationCore; $p = New-Object System.Windows.Media.MediaPlayer; $p.Open([Uri]'${uri}'); $p.Play(); Start-Sleep -Seconds 300"`;
+    } else if (isMac) {
+        command = `afplay '${filePath.replace(/'/g, "'\\''")}'`;
+    } else {
+        const f = filePath.replace(/'/g, "'\\''");
+        command = `mpg123 '${f}' 2>/dev/null || ffplay -nodisp -autoexit '${f}' 2>/dev/null || paplay '${f}' 2>/dev/null || aplay '${f}' 2>/dev/null`;
+    }
 
-    const proc = exec(command, (err) => {
-        if (err && !err.killed) {
-            console.error('[Meme Compiler] Audio playback error', err.message);
-        }
-        if (currentAudioProcess === proc) {
-            currentAudioProcess = null;
-        }
-    });
+    let proc: ChildProcess;
+    if (isWin) {
+        proc = exec(command, (err) => {
+            if (err && !err.killed) { console.error('[Meme Compiler]', err.message); }
+            if (currentProc === proc) { currentProc = null; }
+        });
+    } else {
+        proc = spawn(command, [], { shell: true, detached: true, stdio: 'ignore' });
+        proc.unref();
+        proc.on('error', (err) => console.error('[Meme Compiler]', err.message));
+        proc.on('exit', () => { if (currentProc === proc) { currentProc = null; } });
+    }
 
-    currentAudioProcess = proc;
+    currentProc = proc;
     return proc;
 }
 
-// ===== SOUND MAP =====
+// ===== SOUND CONFIG =====
 
-const BUNDLED_SOUNDS: Record<string, string> = {
-    'fahhh-low': 'fahhh-low.mp3',
-    'faaaahhhhhhh-high': 'faaaahhhhhhh-high.mp3',
-    'vine-boom': 'vine-boom.mp3',
-    'exclamation': 'exclamation.mp3',
-    'among-us-role-reveal-sound': 'among-us-role-reveal-sound.mp3',
-    'anime-ahh': 'anime-ahh.mp3',
-    'women': 'women.mp3',
-    'brah': 'brah.mp3',
-    'anime-wow-sound-effect': 'anime-wow-sound-effect.mp3',
-    'click-nice': 'click-nice.mp3',
-    'run-vine-sound-effect': 'run-vine-sound-effect.mp3',
-    'anime-punch-sad-sound-effect': 'anime-punch-sad-sound-effect.mp3',
-    'nya-cat-girl-sound': 'nya-cat-girl-sound.mp3',
-    'strongpunch': 'strongpunch.mp3',
-    'yamete-kudasai-sound-effect-full-warning': 'yamete-kudasai-sound-effect-full-warning.mp3',
-    'yamete-kudasai-sound-effect-short': 'yamete-kudasai-sound-effect-short.mp3'
+const SOUNDS = [
+    'fahhh-low', 'faaaahhhhhhh-high', 'vine-boom', 'exclamation',
+    'among-us-role-reveal-sound', 'anime-ahh', 'women', 'brah',
+    'anime-wow-sound-effect', 'click-nice', 'run-vine-sound-effect',
+    'anime-punch-sad-sound-effect', 'nya-cat-girl-sound', 'strongpunch',
+    'yamete-kudasai-sound-effect-full-warning', 'yamete-kudasai-sound-effect-short'
+] as const;
+
+const CATEGORIES = ['error', 'silly', 'success', 'running'] as const;
+const DEFAULTS: Record<string, string> = {
+    error: 'fahhh-low', silly: 'women',
+    success: 'anime-wow-sound-effect', running: 'run-vine-sound-effect'
 };
 
-const SOUND_CATEGORIES = ['error', 'silly', 'success', 'running'] as const;
+const outputs = new Map<vscode.TerminalShellExecution, string>();
 
-const executionOutputs = new Map<vscode.TerminalShellExecution, string>();
+// ===== HELPERS =====
 
-export function activate(context: vscode.ExtensionContext) {
-    console.log('[Meme Compiler] Active!');
+function resolvePath(category: string, ctx: vscode.ExtensionContext): string | null {
+    const sel = vscode.workspace.getConfiguration('memeCompiler').get<string>(`sounds.${category}`) || '';
+    if (sel === 'none') { return null; }
 
-    const statusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
-    statusBar.text = '$(unmute) Meme Compiler';
-    statusBar.tooltip = 'Meme Compiler — listening for terminal events';
-    statusBar.show();
-
-    const soundsDir = path.join(context.extensionPath, 'sounds');
-    if (!fs.existsSync(soundsDir)) {
-        fs.mkdirSync(soundsDir);
+    if (sel === 'custom') {
+        const p = ctx.globalState.get<string>(`customSoundPath.${category}`) || '';
+        return (p && fs.existsSync(p)) ? p : null;
     }
 
-    // ===== AUTO FILE PICKER on "custom" selection =====
-    const configListener = vscode.workspace.onDidChangeConfiguration(async (e) => {
-        for (const cat of SOUND_CATEGORIES) {
-            if (e.affectsConfiguration(`memeCompiler.sounds.${cat}`)) {
-                const config = vscode.workspace.getConfiguration('memeCompiler');
-                const value = config.get<string>(`sounds.${cat}`);
-                if (value === 'custom') {
-                    const files = await vscode.window.showOpenDialog({
-                        canSelectMany: false,
-                        filters: { 'Audio Files': ['mp3', 'wav'] },
-                        title: `Select a custom ${cat} sound file`
-                    });
-                    if (files && files.length > 0) {
-                        context.globalState.update(`customSoundPath.${cat}`, files[0].fsPath);
-                        vscode.window.showInformationMessage(`✅ ${cat} sound set to: ${path.basename(files[0].fsPath)}`);
-                    } else {
-                        const defaults: Record<string, string> = {
-                            error: 'fahhh-low', silly: 'women',
-                            success: 'anime-wow-sound-effect', running: 'run-vine-sound-effect'
-                        };
-                        await config.update(`sounds.${cat}`, defaults[cat], vscode.ConfigurationTarget.Global);
-                    }
-                }
-            }
-        }
-    });
-
-    // ===== COMMANDS =====
-
-    const playTestCmd = vscode.commands.registerCommand('meme-compiler-audio.playTestSound', async () => {
-        const category = await vscode.window.showQuickPick(
-            [
-                { label: '❌ Error', value: 'error' },
-                { label: '🤪 Silly', value: 'silly' },
-                { label: '✅ Success', value: 'success' },
-                { label: '🏃 Running', value: 'running' }
-            ],
-            { placeHolder: 'Which sound to test?' }
-        );
-        if (!category) { return; }
-        testAndPlay(category.value, context);
-    });
-
-    const testErrorCmd = vscode.commands.registerCommand('meme-compiler-audio.testError', () => testAndPlay('error', context));
-    const testSillyCmd = vscode.commands.registerCommand('meme-compiler-audio.testSilly', () => testAndPlay('silly', context));
-    const testSuccessCmd = vscode.commands.registerCommand('meme-compiler-audio.testSuccess', () => testAndPlay('success', context));
-    const testRunningCmd = vscode.commands.registerCommand('meme-compiler-audio.testRunning', () => testAndPlay('running', context));
-
-    const openFolderCmd = vscode.commands.registerCommand('meme-compiler-audio.openSoundsFolder', () => {
-        if (!fs.existsSync(soundsDir)) { fs.mkdirSync(soundsDir, { recursive: true }); }
-        vscode.env.openExternal(vscode.Uri.file(soundsDir));
-    });
-
-    const browseCmd = vscode.commands.registerCommand('meme-compiler-audio.browseCustomSound', async () => {
-        const category = await vscode.window.showQuickPick(
-            [
-                { label: '❌ Error Sound', value: 'error' },
-                { label: '🤪 Silly Sound', value: 'silly' },
-                { label: '✅ Success Sound', value: 'success' },
-                { label: '🏃 Running Sound', value: 'running' }
-            ],
-            { placeHolder: 'Which sound do you want to set?' }
-        );
-        if (!category) { return; }
-
-        const files = await vscode.window.showOpenDialog({
-            canSelectMany: false,
-            filters: { 'Audio Files': ['mp3', 'wav'] },
-            title: `Select a ${category.label} file`
-        });
-        if (!files || files.length === 0) { return; }
-
-        context.globalState.update(`customSoundPath.${category.value}`, files[0].fsPath);
-        const config = vscode.workspace.getConfiguration('memeCompiler');
-        await config.update(`sounds.${category.value}`, 'custom', vscode.ConfigurationTarget.Global);
-        vscode.window.showInformationMessage(`${category.label} set to: ${path.basename(files[0].fsPath)}`);
-    });
-
-    // ===== TERMINAL MONITORING =====
-
-    const startListener = vscode.window.onDidStartTerminalShellExecution(async (event) => {
-        const config = vscode.workspace.getConfiguration('memeCompiler');
-        if (!config.get<boolean>('enabled')) { return; }
-
-        // Stop any lingering audio, then play running sound
-        const runningSound = resolveSoundPath('running', context);
-        if (runningSound) {
-            playSoundFile(runningSound);
-        }
-
-        let output = '';
-        try {
-            for await (const chunk of event.execution.read()) {
-                output += chunk;
-                if (output.length > 10000) {
-                    output = output.slice(-10000);
-                }
-            }
-            executionOutputs.set(event.execution, output);
-        } catch (err) {
-            console.error('[Meme Compiler] Error reading terminal output', err);
-        }
-    });
-
-    const endListener = vscode.window.onDidEndTerminalShellExecution(async (event) => {
-        const config = vscode.workspace.getConfiguration('memeCompiler');
-        if (!config.get<boolean>('enabled')) { return; }
-
-        // STOP running sound immediately
-        stopCurrentSound();
-
-        const exitCode = event.exitCode;
-        const output = (executionOutputs.get(event.execution) || '').toLowerCase();
-
-        if (exitCode === undefined) {
-            executionOutputs.delete(event.execution);
-            return;
-        }
-
-        const errorKeywords = config.get<string[]>('detection.errorKeywords') || [];
-        const sillyKeywords = config.get<string[]>('detection.sillyKeywords') || [];
-        const useExitCode = config.get<boolean>('detection.useExitCode') !== false;
-
-        let playType: 'success' | 'error' | 'silly' = 'success';
-
-        for (const keyword of sillyKeywords) {
-            if (output.includes(keyword.toLowerCase())) {
-                playType = 'silly';
-                break;
-            }
-        }
-
-        if (playType !== 'silly') {
-            if (useExitCode && exitCode !== 0) {
-                playType = 'error';
-            } else {
-                for (const keyword of errorKeywords) {
-                    if (output.includes(keyword.toLowerCase())) {
-                        playType = 'error';
-                        break;
-                    }
-                }
-            }
-        }
-
-        console.log(`[Meme Compiler] Exit: ${exitCode} → ${playType}`);
-
-        // Play the result sound (stops running sound first via playSoundFile)
-        const soundPath = resolveSoundPath(playType, context);
-        if (soundPath) {
-            playSoundFile(soundPath);
-        }
-
-        executionOutputs.delete(event.execution);
-    });
-
-    context.subscriptions.push(
-        playTestCmd, testErrorCmd, testSillyCmd, testSuccessCmd, testRunningCmd,
-        openFolderCmd, browseCmd, configListener, startListener, endListener, statusBar
-    );
-}
-
-function testAndPlay(category: string, context: vscode.ExtensionContext) {
-    const soundPath = resolveSoundPath(category, context);
-    if (soundPath) {
-        playSoundFile(soundPath);
-        vscode.window.showInformationMessage(`🔊 Playing ${category} sound...`);
-    } else {
-        vscode.window.showWarningMessage(`No ${category} sound configured.`);
-    }
-}
-
-function resolveSoundPath(category: string, context: vscode.ExtensionContext): string | null {
-    const config = vscode.workspace.getConfiguration('memeCompiler');
-    const selection = config.get<string>(`sounds.${category}`) || '';
-
-    if (selection === 'none') { return null; }
-
-    if (selection === 'custom') {
-        const customPath = context.globalState.get<string>(`customSoundPath.${category}`) || '';
-        if (customPath && fs.existsSync(customPath)) { return customPath; }
-        console.warn(`[Meme Compiler] Custom ${category} sound not found: ${customPath}`);
-        return null;
-    }
-
-    const relPath = BUNDLED_SOUNDS[selection];
-    if (relPath) {
-        const fullPath = path.join(context.extensionPath, 'sounds', relPath);
-        if (fs.existsSync(fullPath)) { return fullPath; }
-        console.warn(`[Meme Compiler] Bundled sound not found: ${fullPath}`);
+    if (SOUNDS.includes(sel as typeof SOUNDS[number])) {
+        const full = path.join(ctx.extensionPath, 'sounds', `${sel}.mp3`);
+        return fs.existsSync(full) ? full : null;
     }
 
     return null;
 }
 
+function testAndPlay(cat: string, ctx: vscode.ExtensionContext) {
+    const p = resolvePath(cat, ctx);
+    if (p) {
+        playSound(p);
+        vscode.window.showInformationMessage(`🔊 Playing ${cat} sound...`);
+    } else {
+        vscode.window.showWarningMessage(`No ${cat} sound configured.`);
+    }
+}
+
+// ===== ACTIVATION =====
+
+export function activate(ctx: vscode.ExtensionContext) {
+    const soundsDir = path.join(ctx.extensionPath, 'sounds');
+    if (!fs.existsSync(soundsDir)) { fs.mkdirSync(soundsDir); }
+
+    // Status bar
+    const bar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
+    bar.text = '$(unmute) Meme Compiler';
+    bar.tooltip = 'Meme Compiler — listening for terminal events';
+    bar.show();
+
+    // Auto file picker on "custom" selection
+    const cfgListener = vscode.workspace.onDidChangeConfiguration(async (e) => {
+        for (const cat of CATEGORIES) {
+            if (!e.affectsConfiguration(`memeCompiler.sounds.${cat}`)) { continue; }
+            const cfg = vscode.workspace.getConfiguration('memeCompiler');
+            if (cfg.get<string>(`sounds.${cat}`) !== 'custom') { continue; }
+
+            const files = await vscode.window.showOpenDialog({
+                canSelectMany: false,
+                filters: { 'Audio Files': ['mp3', 'wav'] },
+                title: `Select a custom ${cat} sound file`
+            });
+            if (files?.length) {
+                ctx.globalState.update(`customSoundPath.${cat}`, files[0].fsPath);
+                vscode.window.showInformationMessage(`✅ ${cat} sound set to: ${path.basename(files[0].fsPath)}`);
+            } else {
+                await cfg.update(`sounds.${cat}`, DEFAULTS[cat], vscode.ConfigurationTarget.Global);
+            }
+        }
+    });
+
+    // Commands
+    const cmds = [
+        vscode.commands.registerCommand('meme-compiler-audio.playTestSound', async () => {
+            const pick = await vscode.window.showQuickPick(
+                [
+                    { label: '❌ Error', value: 'error' },
+                    { label: '🤪 Silly', value: 'silly' },
+                    { label: '✅ Success', value: 'success' },
+                    { label: '🏃 Running', value: 'running' }
+                ],
+                { placeHolder: 'Which sound to test?' }
+            );
+            if (pick) { testAndPlay(pick.value, ctx); }
+        }),
+        vscode.commands.registerCommand('meme-compiler-audio.testError', () => testAndPlay('error', ctx)),
+        vscode.commands.registerCommand('meme-compiler-audio.testSilly', () => testAndPlay('silly', ctx)),
+        vscode.commands.registerCommand('meme-compiler-audio.testSuccess', () => testAndPlay('success', ctx)),
+        vscode.commands.registerCommand('meme-compiler-audio.testRunning', () => testAndPlay('running', ctx)),
+        vscode.commands.registerCommand('meme-compiler-audio.openSoundsFolder', () => {
+            if (!fs.existsSync(soundsDir)) { fs.mkdirSync(soundsDir, { recursive: true }); }
+            vscode.env.openExternal(vscode.Uri.file(soundsDir));
+        }),
+        vscode.commands.registerCommand('meme-compiler-audio.browseCustomSound', async () => {
+            const pick = await vscode.window.showQuickPick(
+                [
+                    { label: '❌ Error Sound', value: 'error' },
+                    { label: '🤪 Silly Sound', value: 'silly' },
+                    { label: '✅ Success Sound', value: 'success' },
+                    { label: '🏃 Running Sound', value: 'running' }
+                ],
+                { placeHolder: 'Which sound do you want to set?' }
+            );
+            if (!pick) { return; }
+            const files = await vscode.window.showOpenDialog({
+                canSelectMany: false,
+                filters: { 'Audio Files': ['mp3', 'wav'] },
+                title: `Select a ${pick.label} file`
+            });
+            if (!files?.length) { return; }
+            ctx.globalState.update(`customSoundPath.${pick.value}`, files[0].fsPath);
+            const cfg = vscode.workspace.getConfiguration('memeCompiler');
+            await cfg.update(`sounds.${pick.value}`, 'custom', vscode.ConfigurationTarget.Global);
+            vscode.window.showInformationMessage(`${pick.label} set to: ${path.basename(files[0].fsPath)}`);
+        })
+    ];
+
+    // Terminal monitoring
+    const onStart = vscode.window.onDidStartTerminalShellExecution(async (event) => {
+        const cfg = vscode.workspace.getConfiguration('memeCompiler');
+        if (!cfg.get<boolean>('enabled')) { return; }
+
+        const snd = resolvePath('running', ctx);
+        if (snd) { playSound(snd); }
+
+        let output = '';
+        try {
+            for await (const chunk of event.execution.read()) {
+                output += chunk;
+                if (output.length > 10000) { output = output.slice(-10000); }
+            }
+            outputs.set(event.execution, output);
+        } catch (err) {
+            console.error('[Meme Compiler] Terminal read error', err);
+        }
+    });
+
+    const onEnd = vscode.window.onDidEndTerminalShellExecution(async (event) => {
+        const cfg = vscode.workspace.getConfiguration('memeCompiler');
+        if (!cfg.get<boolean>('enabled')) { return; }
+
+        stopSound();
+
+        const exitCode = event.exitCode;
+        const output = (outputs.get(event.execution) || '').toLowerCase();
+        outputs.delete(event.execution);
+
+        if (exitCode === undefined) { return; }
+
+        const errorKw = cfg.get<string[]>('detection.errorKeywords') || [];
+        const sillyKw = cfg.get<string[]>('detection.sillyKeywords') || [];
+        const useExit = cfg.get<boolean>('detection.useExitCode') !== false;
+
+        let type: 'success' | 'error' | 'silly' = 'success';
+
+        if (sillyKw.some(k => output.includes(k.toLowerCase()))) {
+            type = 'silly';
+        } else if (useExit && exitCode !== 0) {
+            type = 'error';
+        } else if (errorKw.some(k => output.includes(k.toLowerCase()))) {
+            type = 'error';
+        }
+
+        const snd = resolvePath(type, ctx);
+        if (snd) { playSound(snd); }
+    });
+
+    ctx.subscriptions.push(...cmds, cfgListener, onStart, onEnd, bar);
+}
+
 export function deactivate() {
-    stopCurrentSound();
-    executionOutputs.clear();
+    stopSound();
+    outputs.clear();
 }
